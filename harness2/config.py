@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -127,8 +128,28 @@ def lab_repo() -> Path:
     return DEPENDENCIES / "harvey-labs"
 
 
+def _find_bun() -> Path:
+    dep_bun = DEPENDENCIES / "tools" / "node_modules" / ".bin" / "bun"
+    if dep_bun.is_file():
+        return dep_bun
+    sys_bun = shutil.which("bun") or os.path.expanduser("~/.bun/bin/bun")
+    if sys_bun and Path(sys_bun).is_file():
+        return Path(sys_bun)
+    return dep_bun
+
+
+def _find_codex_dist() -> str:
+    dep_dist = DEPENDENCIES / "codex" / "dist"
+    if (dep_dist / "codex").is_file():
+        return str(dep_dist)
+    sys_codex = shutil.which("codex")
+    if sys_codex and Path(sys_codex).is_file():
+        return str(Path(sys_codex).parent)
+    return str(dep_dist)
+
+
 OPENCODE_DIR = DEPENDENCIES / "opencode"
-BUN = DEPENDENCIES / "tools" / "node_modules" / ".bin" / "bun"
+BUN = _find_bun()
 LAB_PYTHON = lab_repo() / ".venv" / "bin" / "python"
 LAB_JUDGE_MODEL = (
     "vertex/" + JUDGE_MODEL if JUDGE_MODEL.startswith(("claude", "gemini")) else JUDGE_MODEL
@@ -149,14 +170,14 @@ VERTEX_OPENAI_URL = (
     f"https://{_vertex_host}/v1/projects/{VERTEX_PROJECT}"
     f"/locations/{VERTEX_REGION}/endpoints/openapi"
 )
-JB_JUDGE_API_BASE = env("HARNESS2_JUDGE_BASE_URL", VERTEX_OPENAI_URL if VERTEX_PROJECT else "")
+JB_JUDGE_API_BASE = env("HARNESS2_JUDGE_API_BASE", env("HARNESS2_JUDGE_BASE_URL", VERTEX_OPENAI_URL if VERTEX_PROJECT else ""))
 JB_JUDGE_API_KEY = env("HARNESS2_JUDGE_API_KEY", "")
 JB_JUDGE_REASONING_EFFORT = "low"
 JB_REPORTING_JUDGE_DETAILS = ""
 JB_OBS_TRUNC = 50000
 
 CODEX_VERSION = "0.144.6"
-CODEX_DIST = str(DEPENDENCIES / "codex" / "dist")
+CODEX_DIST = _find_codex_dist()
 CODEX_BASE_URL = env("HARNESS2_CODEX_BASE_URL", "")
 CODEX_CONTAINER_URL = env("HARNESS2_CODEX_CONTAINER_URL", CODEX_BASE_URL)
 VERTEX_PROXY_KEY = env("HARNESS2_CODEX_API_KEY", "")
@@ -167,12 +188,16 @@ WB_WEB_JUDGE = "harness2/judge"
 WB_RENDER_PY = sys.executable
 WB_OC_HARNESS_VER = "1.14.18"
 WB_CX_HARNESS_VER = CODEX_VERSION
-WB_MAX_JOBS = {"oc": 1, "cx": 1}
-WB_MAX_TRIALS = {"oc": 2, "cx": 2}
+WB_MAX_JOBS = {"oc": 1, "cx": 1, "agy": 1, "claude": 1}
+WB_MAX_TRIALS = {"oc": 2, "cx": 2, "agy": 2, "claude": 2}
 WB_MODEL_CONNECTION = "local_proxy"
 
-DEFAULT_PROPOSER_CHANNEL = "opencode"
-PROPOSER_MODEL_BY_CHANNEL = {"opencode": IMPROVER_MODEL, "claude_cli": IMPROVER_MODEL}
+DEFAULT_PROPOSER_CHANNEL = env("HARNESS2_PROPOSER_CHANNEL", "opencode")
+PROPOSER_MODEL_BY_CHANNEL = {
+    "opencode": IMPROVER_MODEL,
+    "claude_cli": IMPROVER_MODEL,
+    "agy": IMPROVER_MODEL,
+}
 PHASE_WIDTH = 2
 TRANSPORT_ATTEMPTS = 2
 PROPOSER_CONCURRENCY = 2

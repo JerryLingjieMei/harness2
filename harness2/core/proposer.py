@@ -103,24 +103,35 @@ class Proposer:
             raise ValueError("Set HARNESS2_IMPROVER_MODEL before starting model sessions")
 
     def env(self) -> dict[str, str]:
-        e = {k: v for k, v in os.environ.items() if k not in _DROP_ENV}
+        drop = _DROP_ENV if self.project else ()
+        e = {k: v for k, v in os.environ.items() if k not in drop}
         if self.spec.kind == "claude_cli":
-            e.update(
-                {
-                    "CLAUDE_CODE_USE_VERTEX": "1",
-                    "ANTHROPIC_VERTEX_PROJECT_ID": self.project,
-                    "CLOUD_ML_REGION": self.region,
-                    "ANTHROPIC_MODEL": self.spec.model,
-                }
-            )
+            if self.project:
+                e.update(
+                    {
+                        "CLAUDE_CODE_USE_VERTEX": "1",
+                        "ANTHROPIC_VERTEX_PROJECT_ID": self.project,
+                        "CLOUD_ML_REGION": self.region,
+                        "ANTHROPIC_MODEL": self.spec.model,
+                    }
+                )
+        elif self.spec.kind == "agy":
+            if self.project:
+                e.update(
+                    {
+                        "GOOGLE_CLOUD_PROJECT": self.project,
+                        "GOOGLE_CLOUD_LOCATION": self.region,
+                    }
+                )
         else:
-            e.update(
-                {
-                    "GOOGLE_VERTEX_PROJECT": self.project,
-                    "GOOGLE_VERTEX_LOCATION": self.region,
-                    "VERTEXAI_LOCATION": self.region,
-                }
-            )
+            if self.project:
+                e.update(
+                    {
+                        "GOOGLE_VERTEX_PROJECT": self.project,
+                        "GOOGLE_VERTEX_LOCATION": self.region,
+                        "VERTEXAI_LOCATION": self.region,
+                    }
+                )
         return e
 
     def call(
@@ -159,9 +170,13 @@ class Proposer:
                 if context_dir and Path(context_dir).is_dir():
                     shutil.copytree(context_dir, tmp / "context", dirs_exist_ok=True)
                 with _SEM if _SEM is not None else contextlib.nullcontext():
-                    text, cost, err = (
-                        self._claude_cli if self.spec.kind == "claude_cli" else self._opencode
-                    )(tmp, mission, system, wall)
+                    if self.spec.kind == "claude_cli":
+                        caller = self._claude_cli
+                    elif self.spec.kind == "agy":
+                        caller = self._agy
+                    else:
+                        caller = self._opencode
+                    text, cost, err = caller(tmp, mission, system, wall)
                 spent_usd += cost
                 if not text.strip():
                     last = err or "empty reply"
@@ -309,6 +324,41 @@ class Proposer:
             return text, cost, ""
         tail = _strip_oc_banner(p.stderr or "").strip()[-300:]
         return "", cost, f"rc={p.returncode}: {err or tail or 'empty reply'}"
+
+    def _agy(self, cwd: Path, mission: str, system: str, wall: int) -> tuple[str, float, str]:
+        cli = shutil.which("agy") or "agy"
+        cmd = [
+            cli,
+            "--dangerously-skip-permissions",
+            "-p",
+            (f"{system}\n\n---\n\n" if system else "") + mission,
+            "--output-format",
+            "json",
+            "--effort",
+            self.spec.effort,
+            "--add-dir",
+            str(cwd),
+        ]
+        if self.spec.model:
+            cmd.extend(["--model", self.spec.model])
+        p = subprocess.run(
+            cmd,
+            cwd=cwd,
+            env=self.env(),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=wall,
+        )
+        payload = _parse_json(p.stdout)
+        text = str(payload.get("response") or payload.get("result") or "")
+        err = ""
+        if payload.get("status") not in (None, "SUCCESS", "success"):
+            err = f"CLI error: {payload.get('status')} {str(text)[:200]}"
+            text = ""
+        elif p.returncode != 0 and not text.strip():
+            err = f"rc={p.returncode}: {(p.stderr or '')[-300:]}"
+        return text, 0.0, err
 
     def _harvest(self, tmp: Path, sub: str, label: str, cache_key: str = "") -> Path | None:
         """Copy `tmp/<sub>` somewhere durable before the session directory is removed."""
