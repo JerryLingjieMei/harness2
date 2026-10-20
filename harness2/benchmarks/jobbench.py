@@ -494,9 +494,9 @@ def render_opencode_tree(staged: Path, render_dir: Path, ctx: dict) -> None:
             shutil.copy(p, rd / ".opencode" / "plugin" / p.name)
 
 
-_INSTALL_MODE = {"oc": "workspace_agents_md", "cx": "codex_root"}
+_INSTALL_MODE = {"oc": "workspace_agents_md", "cx": "codex_root", "agy": "agy_root", "claude": "claude_root"}
 
-_DEFAULT_TIMEOUT = {"oc": 2400, "cx": 3600}
+_DEFAULT_TIMEOUT = {"oc": 2400, "cx": 3600, "agy": 3600, "claude": 3600}
 
 
 def _channels() -> dict:
@@ -507,7 +507,7 @@ def _channels() -> dict:
 
 def make_spec(substrate: str) -> BenchSpec:
     if substrate not in _INSTALL_MODE:
-        raise ValueError(f"JobBench substrate must be 'oc' or 'cx', got {substrate!r}")
+        raise ValueError(f"JobBench substrate must be in {tuple(_INSTALL_MODE.keys())}, got {substrate!r}")
     return BenchSpec(
         name="jb",
         runs_root=config.RUNS / "jb",
@@ -632,13 +632,21 @@ class JobBenchAdapter:
     ):
         self.split_file = split_file
         self.spec = make_spec(substrate)
-        launcher = self._launch_opencode if substrate == "oc" else self._launch_codex
-        self.substrate = (
-            OpencodeSubstrate(launcher=launcher)
-            if substrate == "oc"
-            else CodexSubstrate(launcher=launcher)
-        )
-        self.timeout = int(timeout or _DEFAULT_TIMEOUT[substrate])
+        if substrate == "oc":
+            launcher = self._launch_opencode
+            self.substrate = OpencodeSubstrate(launcher=launcher)
+        elif substrate == "cx":
+            launcher = self._launch_codex
+            self.substrate = CodexSubstrate(launcher=launcher)
+        elif substrate == "agy":
+            from ..substrate.agy import AgySubstrate
+            launcher = self._launch_codex
+            self.substrate = AgySubstrate(launcher=launcher)
+        else:
+            from ..substrate.claude import ClaudeSubstrate
+            launcher = self._launch_codex
+            self.substrate = ClaudeSubstrate(launcher=launcher)
+        self.timeout = int(timeout or _DEFAULT_TIMEOUT.get(substrate, 3600))
         self.store = Path(store_root) if store_root else config.RUNS / "jb" / "dataset"
 
     def tasks(self, split: str = "all") -> list[str]:

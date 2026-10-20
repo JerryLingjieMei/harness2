@@ -39,21 +39,37 @@ print(f'Total: {total:.2f}')
 
 
 class DemoAdapter:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, substrate: str = "oc"):
         self.root = root
-        self.substrate = OpencodeSubstrate()
+        if substrate == "cx":
+            from .substrate.codex import CodexSubstrate
+            self.substrate = CodexSubstrate()
+            install_mode = "codex_root"
+        elif substrate == "agy":
+            from .substrate.agy import AgySubstrate
+            self.substrate = AgySubstrate()
+            install_mode = "agy_root"
+        elif substrate == "claude":
+            from .substrate.claude import ClaudeSubstrate
+            self.substrate = ClaudeSubstrate()
+            install_mode = "claude_root"
+        else:
+            self.substrate = OpencodeSubstrate()
+            install_mode = "workspace_config"
+
         channel = ChannelSpec("opencode", "local/deterministic")
         self.spec = BenchSpec(
             name="demo",
             runs_root=root / "runs",
-            install_mode="workspace_config",
+            install_mode=install_mode,
             prompts=BenchPrompts(work="reconcile signed amounts in a transaction ledger"),
             channels={"proposer": channel, "selector": channel},
             leak_globs=("reference_answer.txt",),
         )
         self.execution_count = 0
         base = {name: "" for name in self.substrate.surface().always_on}
-        base["systemprompt.md"] = "Reconcile the ledger using python scripts/summarize.py.\n"
+        primary_prompt = self.substrate.surface().always_on[0]
+        base[primary_prompt] = "Reconcile the ledger using python scripts/summarize.py.\n"
         base["scripts/summarize.py"] = BASE_SCRIPT
         tree.write_tree(self.substrate.surface(), base, self.base_harness(), stubs=False)
         for task_id, amounts in (
